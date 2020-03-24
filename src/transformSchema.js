@@ -24,8 +24,73 @@ const editorMap = {
   tagEditor: 'tags'
 }
 
+function transformSimpleTypeToLocalizedVersion(typeName, supportedLanguages) {
+  return `
+import supportedLanguages from './supportedLanguages'
+
+export default {
+  name: '${getLocalizedTypeName(typeName, true)}',
+  type: 'object',
+  fieldsets: [
+    {
+      title: 'Translations',
+      name: 'translations',
+      options: {collapsible: true}
+    }
+  ],
+  fields: supportedLanguages.map(lang => (
+    {
+      title: lang.title,
+      name: lang.id,
+      type: '${typeName}',
+      fieldset: lang.isDefault ? null : 'translations'
+    }
+  ))  
+}`
+}
+
+function transformMoreComplexTypeToLocalizedVersion(typeName, type, options, of) {
+  return ` 
+  
+  {
+    name: '${getLocalizedTypeName(typeName, true)}',
+    type: 'object',
+    fieldsets: [
+      {
+        title: 'Translations',
+        name: 'translations',
+        options: {collapsible: true}
+      }
+    ],
+    fields: supportedLanguages.map(lang => (
+      {
+        title: lang.title,
+        name: lang.id,
+        type: "${typeName}",
+        of: ${JSON.stringify(of)},
+        options: ${JSON.stringify(options)},
+        fieldset: lang.isDefault ? null : 'translations'
+      })
+
+  }`
+}
+
+function capitalizedFirstLetter (word) {
+  return word.charAt(0).toUpperCase() + word.slice(1)
+}
+
+function getLocalizedTypeName(typeName, isTypeLocalized) {
+  const localizedPrefix = "locale";
+  if (isTypeLocalized){
+    const typeNameCapitalized = typeName.charAt(0).toUpperCase() + typeName.slice(1)
+    return localizedPrefix + typeNameCapitalized;
+  }
+
+  return typeName;
+}
+
 function transformSchema(data, options) {
-  return data.contentTypes.map(type => transformContentType(type, data, options))
+    return data.contentTypes.map(type => transformContentType(type, data, options));
 }
 
 function transformContentType(type, data, options) {
@@ -34,7 +99,7 @@ function transformContentType(type, data, options) {
     title: type.name,
     description: type.description || undefined,
     type: 'document'
-  }
+  };
 
   if (type.displayField) {
     output.preview = {select: {title: type.displayField}}
@@ -52,9 +117,9 @@ function transformContentType(type, data, options) {
         isRequired(source),
         isHidden(source),
         {type: undefined},
-        contentfulTypeToSanityType(source, data, type.sys.id, options)
+        contentfulTypeToSanityType(source, data, type.sys.id, options, source.localized)
       )
-    )
+    );
 
   return output
 }
@@ -73,33 +138,39 @@ function shouldSkip(source, data, typeId) {
   return source.type === 'Object' && widgetId === 'objectEditor'
 }
 
-function contentfulTypeToSanityType(source, data, typeId, options) {
+function contentfulTypeToSanityType(source, data, typeId, options, isLocalized) {
   const editor = data.editorInterfaces.find(ed => ed.sys.contentType.sys.id === typeId)
   const widgetId = editor.controls.find(ctrl => ctrl.fieldId === source.id).widgetId
   const defaultEditor = defaultEditors[source.type]
   const sanityEquivalent = directMap[source.type]
 
   if (sanityEquivalent && widgetId === defaultEditor) {
-    return {type: sanityEquivalent}
+    return {type: getLocalizedTypeName(sanityEquivalent, isLocalized) };
   }
 
   if (widgetId === 'urlEditor') {
-    return {type: 'url'}
+    return { type: getLocalizedTypeName('url', isLocalized) };
   }
 
   if (widgetId === 'slugEditor') {
-    return determineSlugType(source, data, typeId)
+    return determineSlugType(source, data, typeId, isLocalized)
   }
 
   if (!options.keepMarkdown && source.type === 'Text' && widgetId === 'markdown') {
+    if (!isLocalized)
+      return {
+        type: 'array',
+        of: [{type: 'block'}, {type: 'image'}]
+      }
+
     return {
-      type: 'array',
-      of: [{type: 'block'}, {type: 'image'}]
+      // @todo add localized md
+      type: 'localizedMarkdownText'
     }
   }
 
   if (source.type === 'Text') {
-    return {type: 'text'}
+    return { type: getLocalizedTypeName('text', isLocalized) };
   }
 
   if (source.type === 'Link') {
@@ -112,11 +183,30 @@ function contentfulTypeToSanityType(source, data, typeId, options) {
 
   if (sanityEquivalent && ['dropdown', 'radio'].includes(widgetId)) {
     const {list, layout} = determineSelectOptions(source, data, typeId)
-    return {type: sanityEquivalent, options: {list, layout}}
+    return {type: getLocalizedTypeName(sanityEquivalent, isLocalized), options: {list, layout}}
   }
 
   if (source.type === 'Symbol') {
-    return {type: 'string'}
+
+    return { type: getLocalizedTypeName('string', isLocalized) };
+  }
+
+  if (source.type === 'RichText') {
+    if (!isLocalized)
+      return {
+        type: 'array',
+        of: [
+          {
+            type: 'block',
+          },
+          { type: 'reference', to: [{type: 'section' },{type: 'foldedContent' }, {type: 'faq' },{type: 'casinoComparison' }]},
+          { type: 'foldedContent' },
+          { type: 'section' },
+          { type: 'casinoComparison' },
+          { type: 'faq' }
+        ],
+      }
+    return {type: getLocalizedTypeName('RichText', isLocalized)}
   }
 
   throw new Error(
@@ -126,14 +216,14 @@ function contentfulTypeToSanityType(source, data, typeId, options) {
   )
 }
 
-function determineSlugType(source, data, typeId) {
+function determineSlugType(source, data, typeId, isLocalized) {
   const type = data.contentTypes.find(typ => typ.sys.id === typeId)
-  const sourceField = type.displayField
+  const sourceField = type.displayField;
   if (!sourceField) {
     throw new Error(`Unable to determine which field to extract slug from`)
   }
 
-  return {type: 'slug', options: {source: sourceField}}
+  return {type: getLocalizedTypeName('slug', isLocalized), options: {source: sourceField}}
 }
 
 function determineSelectOptions(source, data, typeId) {
@@ -186,27 +276,33 @@ function determineRefType(source, data) {
   throw new Error(`Unhandled link type "${source.linkType}"`)
 }
 
-function determineAssetRefType(source, data) {
+function determineAssetRefType(source, data, isLocalized) {
   const mimeValidation = source.validations.find(val => val.linkMimetypeGroup) || {}
   const mimeGroups = mimeValidation.linkMimetypeGroup || []
 
   if (mimeGroups.includes('image') || ['image', 'picture'].includes(source.id)) {
-    return {type: 'image'}
+    return {type: getLocalizedTypeName('image', isLocalized)}
   }
 
   // @todo file/image?
-  return {type: 'file'}
+  return {type: getLocalizedTypeName('image', isLocalized)}
 }
 
-function determineEntryRefType(source, data) {
+function determineEntryRefType(source, data, isLocalized) {
   const typeValidation = source.validations.find(val => val.linkContentType) || {}
   const linkTypes = typeValidation.linkContentType || []
   if (linkTypes.length === 1) {
-    return {type: 'reference', to: [{type: linkTypes[0]}]}
+    if (!isLocalized)
+      return {type: 'reference', to: [{type: linkTypes[0]}]}
+
+    return {type: getLocalizedTypeName('reference' + capitalizedFirstLetter(linkTypes[0]), isLocalized) }
   }
 
   if (linkTypes.length > 1) {
-    return {type: 'reference', to: linkTypes.map(type => ({type}))}
+    if (!isLocalized)
+      return {type: 'reference', to: linkTypes.map(type => ({type}))}
+
+    return {type: getLocalizedTypeName('reference' + linkTypes.map(x => capitalizedFirstLetter(x)).join(''))}
   }
 
   return {type: 'reference', to: data.contentTypes.map(type => ({type: type.sys.id}))}

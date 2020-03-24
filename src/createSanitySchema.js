@@ -20,7 +20,7 @@ const defaultPrettierOptions = {
   bracketSpacing: false
 }
 
-function createSanitySchema(types, options = {}) {
+function createSanitySchema(types, localeTypes, options = {}) {
   const typeNames = types.map(type => upperFirst(type.name))
   const typeImports = typeNames.map(generateImport).join('\n')
   const typeArray = typeNames.join(', ')

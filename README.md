@@ -7,7 +7,7 @@ This package liberates Contentful spaces, creating Sanity projects and schemas a
 ```
 npm install -g contentful-to-sanity
 ```
-
+# CFPAT-9umEKGJbPGcUwfT8iyE9Q_8nTObqULAE04IdsLeVjMY
 ## Requirements
 
 Requires node.js version >= 7.6

@@ -1,18 +1,16 @@
-const markdownToBlocks = require('./markdownToBlocks')
+const markdownToBlocks = require('./markdownToBlocks');
+const richTextToBlocks = require('./richTextToBlocks');
 
 const transformData = (data, options = {}) => {
-  if (data.locales.length > 1 && !options.locale) {
-    throw new Error('Only one locale supported currently, please specify which locale to use')
-  }
 
   if (options.locale && !data.locales.find(locale => locale.code === options.locale)) {
     throw new Error(`Locale "${options.locale}" not found in exported Contentful data`)
   }
 
-  const locale = options.locale || data.locales[0].code
-  const opts = Object.assign({}, options, {locale})
-  return data.entries.filter(isPublished).map(entry => transformEntry(entry, data, opts))
-}
+  const locale = options.locale || data.locales[0].code;
+  const opts = Object.assign({}, options, {locale});
+  return data.entries.filter(isPublished).map(entry => transformEntry(entry, data, opts));
+};
 
 function isPublished(entry) {
   return typeof entry.sys.publishedAt === 'string'
@@ -24,20 +22,41 @@ function transformEntry(entry, data, options) {
     _type: entry.sys.contentType.sys.id,
     _createdAt: entry.sys.createdAt,
     _updatedAt: entry.sys.updatedAt
-  }
+  };
+
+  const supportedLanguages = [
+    {id: 'fi', cfId: 'fi'},
+    {id: 'en', cfId: 'en'},
+    {id: 'enCA', cfId: 'en-CA'},
+    {id: 'enGB', cfId: 'en-GB'}
+  ];
+
 
   return Object.keys(entry.fields).reduce((acc, fieldName) => {
-    acc[fieldName] = transformField(entry, fieldName, data, options)
+    supportedLanguages.forEach( x => {
+      const type = data.contentTypes.find(contentType => contentType.sys.id === entry.sys.contentType.sys.id);
+      const fieldData = type.fields.find(field => field.id === fieldName);
+      const localized = fieldData.localized;
+
+      if (localized) {
+        if (typeof acc[fieldName] === typeof undefined || acc[fieldName] === null)
+          acc[fieldName] = {};
+        acc[fieldName][x.id] = transformField(entry, fieldName, data, options, x.cfId);
+      } else {
+        acc[fieldName] = transformField(entry, fieldName, data, options, "fi");
+      }
+    });
+
     return acc
   }, doc)
 }
 
-function transformField(entry, fieldName, data, options) {
-  const {locale, keepMarkdown} = options
-  const value = entry.fields[fieldName][locale]
-  const typeId = entry.sys.contentType.sys.id
-  const editor = data.editorInterfaces.find(ed => ed.sys.contentType.sys.id === typeId)
-  const widgetId = editor.controls.find(ctrl => ctrl.fieldId === fieldName).widgetId
+function transformField(entry, fieldName, data, options, locale) {
+  const { keepMarkdown} = options;
+  const value = entry.fields[fieldName][locale];
+  const typeId = entry.sys.contentType.sys.id;
+  const editor = data.editorInterfaces.find(ed => ed.sys.contentType.sys.id === typeId);
+  const widgetId = editor.controls.find(ctrl => ctrl.fieldId === fieldName).widgetId;
 
   if (typeof value === 'undefined') {
     return undefined
@@ -55,19 +74,28 @@ function transformField(entry, fieldName, data, options) {
     return transformLink(value, data, locale, options, entry)
   }
 
-  const parentTypeDef = data.contentTypes.find(type => type.sys.id === typeId)
+  if (typeId === 'richText' ||(value && value.sys && value.sys.type === 'RichText')) {
+    return richTextToBlocks(value);
+  }
+
+  const parentTypeDef = data.contentTypes.find(type => type.sys.id === typeId);
   if (!parentTypeDef) {
     throw new Error(`Could not find type definition for type "${typeId}"`)
   }
 
-  const typeDef = parentTypeDef.fields.find(field => field.id === fieldName)
+  const typeDef = parentTypeDef.fields.find(field => field.id === fieldName);
   if (!typeDef) {
     throw new Error(`Could not find type definition for field "${fieldName}" in type "${typeId}"`)
   }
 
   if (typeDef.type === 'Location') {
-    return transformLocation(value)
+    return transformLocation(value);
   }
+
+  if (typeDef.type === 'RichText'){
+    return richTextToBlocks(value);
+  }
+
 
   if (Array.isArray(value)) {
     return value.map(val => {
@@ -107,26 +135,27 @@ function transformLink(value, data, locale, options, parent) {
 }
 
 function transformAssetLink(value, data, locale, options, parent) {
-  const asset = data.assets.find(item => item.sys.id === value.sys.id)
-  if (!asset && !options.weakRefs) {
-    const parentId = parent.sys.id
-    throw new Error(
-      `Document with ID "${parentId}" references non-existing asset with ID "${value.sys.id}"`
+  if (data.assets) {
+    const asset = data.assets.find(item => item.sys.id === value.sys.id);
+    if (!asset && !options.weakRefs) {
+      return undefined;
+    } else if (!asset) {
+      return undefined
+    }
+
+    const file = asset.fields.file[locale];
+    const type = file.contentType.startsWith('image/') ? 'image' : 'file'
+    return maybeWeakRef(
+      {_type: 'reference', _sanityAsset: `${type}@${prefixUrl(file.url)}`},
+      options
     )
-  } else if (!asset) {
-    return undefined
   }
 
-  const file = asset.fields.file[locale]
-  const type = file.contentType.startsWith('image/') ? 'image' : 'file'
-  return maybeWeakRef(
-    {_type: 'reference', _sanityAsset: `${type}@${prefixUrl(file.url)}`},
-    options
-  )
+  return undefined;
 }
 
 function prefixUrl(url) {
   return url.startsWith('//') ? `https:${url}` : url
 }
 
-module.exports = transformData
+module.exports = transformData;

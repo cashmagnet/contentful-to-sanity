@@ -25,7 +25,7 @@ module.exports = async opts => {
       skipWebhooks: true,
       skipRoles: true,
       includeDrafts: true,
-      maxAllowedLimit: 500,
+      maxAllowedLimit: 100,
       listrOptions: {renderer: 'silent'}
     }).run({data: {}})
 
